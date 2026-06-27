@@ -1,0 +1,253 @@
+{
+  "name": "2 - Trends Analysis Tool",
+  "nodes": [
+    {
+      "parameters": {
+        "values": {
+          "number": [
+            {
+              "name": "wantedDate",
+              "value": "={{ $json.wanted_date }}"
+            }
+          ],
+          "string": [
+            {
+              "name": "stockSymbol",
+              "value": "={{ $('Workflow Input Trigger').item.json.ticker }}"
+            },
+            {
+              "name": "apikey",
+              "value": "PASTE_ALPHA_VANTAGE_API_KEY_HERE"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a115ed44-5533-4108-8000-211b95683f10",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        3120,
+        256
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Custom code for n8n Code node to analyze news data from Alpha Vantage\n * \n * - The code receives API data from the previous node\n * - Analyzes sentiment, leading articles, and hot topics\n * - Returns a structured JSON object for further processing\n */\n\nconst stockSymbol = $('Set Variables').first().json.stockSymbol\nconst allNews = $input.first().json.feed\n  ;\nconst today = new Date().toISOString().split('T')[0]; // Current date in YYYY-MM-DD format\n\n// Filter articles relevant to the stock\nconst relevantArticles = allNews.filter(article => {\n  return article.ticker_sentiment && article.ticker_sentiment.some(ticker => \n    ticker.ticker === stockSymbol\n  );\n});\n\n// Sentiment analysis\nlet sentimentCounts = {\n  \"Bullish\": 0,\n  \"Somewhat-Bullish\": 0,\n  \"Neutral\": 0,\n  \"Somewhat-Bearish\": 0,\n  \"Bearish\": 0\n};\n\nlet totalSentimentScore = 0;\nlet totalRelevanceScore = 0;\n\nrelevantArticles.forEach(article => {\n  const stockTicker = article.ticker_sentiment.find(ticker => ticker.ticker === stockSymbol);\n  if (stockTicker) {\n    sentimentCounts[stockTicker.ticker_sentiment_label]++;\n    totalSentimentScore += parseFloat(stockTicker.ticker_sentiment_score) * parseFloat(stockTicker.relevance_score);\n    totalRelevanceScore += parseFloat(stockTicker.relevance_score);\n  }\n});\n\nconst avgSentimentScore = totalRelevanceScore > 0 ? totalSentimentScore / totalRelevanceScore : 0;\n\n// Determining overall sentiment\nlet overallSentiment;\nif (avgSentimentScore >= 0.35) {\n  overallSentiment = \"חיובי מאוד\";\n} else if (avgSentimentScore >= 0.15) {\n  overallSentiment = \"חיובי\";\n} else if (avgSentimentScore > -0.15) {\n  overallSentiment = \"נייטרלי\";\n} else if (avgSentimentScore > -0.35) {\n  overallSentiment = \"שלילי\";\n} else {\n  overallSentiment = \"שלילי מאוד\";\n}\n\n// Most influential articles\nconst topArticles = relevantArticles\n  .map(article => {\n    const stockTicker = article.ticker_sentiment.find(ticker => ticker.ticker === stockSymbol);\n    return {\n      title: article.title,\n      url: article.url,\n      source: article.source,\n      date: formatDate(article.time_published),\n      sentiment_label: stockTicker ? stockTicker.ticker_sentiment_label : \"N/A\",\n      sentiment_score: stockTicker ? parseFloat(stockTicker.ticker_sentiment_score) : 0,\n      relevance_score: stockTicker ? parseFloat(stockTicker.relevance_score) : 0,\n      impact_score: stockTicker ? Math.abs(parseFloat(stockTicker.ticker_sentiment_score) * parseFloat(stockTicker.relevance_score)) : 0\n    };\n  })\n  .sort((a, b) => b.impact_score - a.impact_score)\n  .slice(0, 5);\n\n// Analysis of main topics\nconst topicsMap = {};\n\nrelevantArticles.forEach(article => {\n  if (article.topics) {\n    article.topics.forEach(topic => {\n      if (!topicsMap[topic.topic]) {\n        topicsMap[topic.topic] = {\n          count: 0,\n          relevance: 0\n        };\n      }\n      topicsMap[topic.topic].count++;\n      topicsMap[topic.topic].relevance += parseFloat(topic.relevance_score);\n    });\n  }\n});\n\nconst hotTopics = Object.entries(topicsMap)\n  .map(([topic, data]) => ({\n    topic,\n    article_count: data.count,\n    average_relevance: (data.relevance / data.count).toFixed(2)\n  }))\n  .sort((a, b) => b.article_count - a.article_count)\n  .slice(0, 5);\n\n// Creating result object\nconst analysisResult = {\n  stock_symbol: stockSymbol,\n  analysis_date: today,\n  sentiment_analysis: {\n    overall_sentiment: overallSentiment,\n    sentiment_score: parseFloat(avgSentimentScore.toFixed(4)),\n    sentiment_distribution: sentimentCounts\n  },\n  top_articles: topArticles.map(article => ({\n    title: article.title,\n    source: article.source,\n    url: article.url,\n    date: article.date,\n    sentiment: article.sentiment_label,\n    impact_score: article.impact_score.toFixed(4)\n  })),\n  hot_topics: hotTopics,\n  recent_trends: {\n    description: getTrendDescription(overallSentiment, hotTopics),\n    market_outlook: getMarketOutlook(overallSentiment)\n  }\n};\n\n// Helper functions\nfunction formatDate(dateStr) {\n  if (!dateStr) return \"N/A\";\n  \n  try {\n    // Format: 20250418T152049 -> 2025-04-18\n    const year = dateStr.substring(0, 4);\n    const month = dateStr.substring(4, 6);\n    const day = dateStr.substring(6, 8);\n    return `${year}-${month}-${day}`;\n  } catch (e) {\n    return dateStr;\n  }\n}\n\nfunction getTrendDescription(sentiment, topics) {\n  let description = \"\";\n  \n  if (sentiment === \"חיובי מאוד\" || sentiment === \"חיובי\") {\n    description = \"מגמה חיובית כאשר משקיעים מתמקדים בעיקר ב\";\n  } else if (sentiment === \"שלילי מאוד\" || sentiment === \"שלילי\") {\n    description = \"מגמה שלילית כאשר החששות העיקריים מתמקדים ב\";\n  } else {\n    description = \"מגמה מעורבת עם התמקדות ב\";\n  }\n  \n  if (topics.length > 0) {\n    const topThreeTopics = topics.slice(0, Math.min(3, topics.length));\n    description += topThreeTopics.map(t => t.topic).join(\", \");\n  } else {\n    description += \"מגוון נושאים\";\n  }\n  \n  return description + \".\";\n}\n\nfunction getMarketOutlook(sentiment) {\n  if (sentiment === \"חיובי מאוד\") {\n    return \"תחזית שוק חיובית מאוד. הסנטימנט הכללי מצביע על אמון משקיעים גבוה ופוטנציאל לעלייה בטווח הקצר.\";\n  } else if (sentiment === \"חיובי\") {\n    return \"תחזית שוק חיובית. ישנן אינדיקציות לאופטימיות זהירה בקרב משקיעים.\";\n  } else if (sentiment === \"נייטרלי\") {\n    return \"תחזית שוק מעורבת. קיימים כוחות מאזנים של אופטימיות ופסימיות בשוק.\";\n  } else if (sentiment === \"שלילי\") {\n    return \"תחזית שוק שלילית. ישנן דאגות בקרב משקיעים שעשויות להשפיע על המניה בטווח הקצר.\";\n  } else {\n    return \"תחזית שוק שלילית מאוד. קיימת אווירת זהירות משמעותית ונטייה למכירות.\";\n  }\n}\n\n// Return the object for further flow in n8n\nreturn {\n  json: analysisResult\n};"
+      },
+      "id": "08b56ad3-3825-4b33-a188-4a0ab49e774d",
+      "name": "Analyse API Input",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3488,
+        256
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={{ $json.stockSymbol }}&sort=RELEVANCE&time_from={{ $json.wantedDate }}&apikey={{ $json.apikey }}",
+        "options": {}
+      },
+      "id": "1878bab6-e974-4bdd-91dd-012f39bd89e4",
+      "name": "Get News Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3296,
+        256
+      ],
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Function to generate yesterday's date in the required format\nfunction getYesterdayDateFormat() {\n  // Create a current date object\n  const today = new Date();\n  \n  // Set the date to the previous day (yesterday)\n  today.setDate(today.getDate() - 1);\n  \n  // Reset hours, minutes, seconds and milliseconds to 00:00:00.000\n  today.setHours(0, 0, 0, 0);\n  \n  // Extract components\n  const year = today.getFullYear();\n  const month = String(today.getMonth() + 1).padStart(2, '0'); // Months in JS start from 0\n  const day = String(today.getDate()).padStart(2, '0');\n  const hours = String(today.getHours()).padStart(2, '0');\n  const minutes = String(today.getMinutes()).padStart(2, '0');\n  \n  // Build the string in the required format\n  return `${year}${month}${day}T${hours}${minutes}`;\n}\n// Calculate the date\nconst yesterdayDate = getYesterdayDateFormat();\n// Return the result in the format required by n8n - array of objects\nreturn [\n  {\n    json: {\n      wanted_date: yesterdayDate\n    }\n  }\n];"
+      },
+      "id": "34823416-d593-4d4d-b214-e32016fe8044",
+      "name": "Generate Variables For API",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2960,
+        256
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "ticker"
+            },
+            {
+              "name": "chart_style"
+            }
+          ]
+        }
+      },
+      "id": "f83d3de8-b5f7-4fc9-b6d0-a8ff2617129c",
+      "name": "Workflow Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "url": "=https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&ticker={{ $('Workflow Input Trigger').item.json.ticker }}&type=8-K&dateb=&owner=include&count=10&output=atom",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "StudentProject sachakov@post.bgu.ac.il"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "f64a8918-5441-4c13-aed4-407e60dc6b6c",
+      "name": "Get Earnings Filings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract recent filing titles + dates from the SEC atom XML (text).\nconst xml = $input.first().json.data || \"\";\nconst entries = [];\nconst re = /<entry>([\\s\\S]*?)<\\/entry>/g;\nlet m;\nwhile ((m = re.exec(xml)) !== null && entries.length < 8) {\n  const block = m[1];\n  const t = (block.match(/<title>([\\s\\S]*?)<\\/title>/) || [,\"\"])[1].trim();\n  const d = (block.match(/<updated>([\\s\\S]*?)<\\/updated>/) || [,\"\"])[1].trim();\n  if (t) entries.push({ title: t, date: d });\n}\nreturn [{ json: { earningsFilings: entries } }];"
+      },
+      "id": "084f0ae5-f90c-47cc-a23c-06b3c5981398",
+      "name": "Parse Earnings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "4f9cb289-b668-4e66-a889-1c4f3d5277e1",
+      "name": "Merge Trends",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        864,
+        80
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get News Data": {
+      "main": [
+        [
+          {
+            "node": "Analyse API Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "Get News Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "Generate Variables For API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Earnings Filings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Variables For API": {
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Earnings Filings": {
+      "main": [
+        [
+          {
+            "node": "Parse Earnings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse API Input": {
+      "main": [
+        [
+          {
+            "node": "Merge Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Earnings": {
+      "main": [
+        [
+          {
+            "node": "Merge Trends",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "33b8d308-551f-4181-89eb-fe900f108fff",
+  "meta": {
+    "instanceId": "bf00f3c3721e368cc295fea6dcd546d93249bcf89a8c29d5f6238f14c927be05"
+  },
+  "nodeGroups": [],
+  "id": "XnqxWVDrSIBEMPiG",
+  "tags": []
+}

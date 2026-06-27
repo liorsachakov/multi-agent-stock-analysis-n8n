@@ -1,0 +1,1251 @@
+{
+  "name": "3 - Stock Analysis Agent (Telegram + HF)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "/**\n * INPUT: items[0].json (Original JSON)\n * OUTPUT: { textPayload: \"```json\\n{ ... }\\n```\" }\n */\n\nconst pretty = JSON.stringify(items[0].json, null, 2);\nconst wrapped = `\\`\\`\\`json\\n${pretty}\\n\\`\\`\\``;\n\nreturn [\n  {\n    json: {\n      textPayload: wrapped\n    }\n  }\n];\n"
+      },
+      "id": "5ee68e02-5936-46d5-9f3d-327836230791",
+      "name": "Warp as JSON for GPT",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2208,
+        672
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.chart-img.com/v2/tradingview/advanced-chart/storage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"style\": \"candle\",\n  \"theme\": \"light\",\n  \"interval\": \"1W\",\n  \"symbol\": \"NASDAQ:{{ $json.ticker }}\",\n  \"override\": {\n    \"showStudyLastValue\": false\n  },\n  \"studies\": [\n    {\n      \"name\": \"Volume\",\n      \"forceOverlay\": true\n    },\n    {\n      \"name\": \"Moving Average Exponential\",\n      \"inputs\": {\n        \"length\": 200\n      }\n    },\n    {\n      \"name\": \"Relative Strength Index\"\n    }\n  ]\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "2aa7b69d-899b-4c6b-9421-70d33c6f0157",
+      "name": "Get Chart URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        864,
+        400
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "tzKqbZR0A2nBfPkm",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get historical price data\nconst data = $input.item.json;\n\n// Check if data exists\nif (!data.values || data.values.length === 0) {\n  return { json: { error: \"No price data available\", ticker: data.meta?.symbol } };\n}\n\n// Convert prices to numbers\nconst prices = data.values.map(v => parseFloat(v.close)).reverse();\n\n// Function to calculate Fibonacci levels\nfunction calculateFibonacciLevels() {\n  // Find min and max prices\n  const max = Math.max(...prices);\n  const min = Math.min(...prices);\n  const diff = max - min;\n  \n  return {\n    level_0: min.toFixed(2),\n    level_0_236: (min + diff * 0.236).toFixed(2),\n    level_0_382: (min + diff * 0.382).toFixed(2),\n    level_0_5: (min + diff * 0.5).toFixed(2),\n    level_0_618: (min + diff * 0.618).toFixed(2),\n    level_0_786: (min + diff * 0.786).toFixed(2),\n    level_1: max.toFixed(2)\n  };\n}\n// Function to identify support and resistance levels\nfunction findSupportResistanceLevels() {\n  // We need at least 30 data points\n  if (prices.length < 30) {\n    return { support: [], resistance: [] };\n  }\n  \n  const supportLevels = [];\n  const resistanceLevels = [];\n  \n  // Check each point (except edges) if it's a local minimum or maximum\n  const lookback = 5; // how many points to check in each direction\n  \n  for (let i = lookback; i < prices.length - lookback; i++) {\n    // Check for local minimum (support)\n    let isMinimum = true;\n    for (let j = i - lookback; j < i; j++) {\n      if (prices[j] <= prices[i]) {\n        isMinimum = false;\n        break;\n      }\n    }\n    \n    for (let j = i + 1; j <= i + lookback; j++) {\n      if (prices[j] <= prices[i]) {\n        isMinimum = false;\n        break;\n      }\n    }\n    \n    if (isMinimum) {\n      supportLevels.push(prices[i]);\n    }\n    \n    // Check for local maximum (resistance)\n    let isMaximum = true;\n    for (let j = i - lookback; j < i; j++) {\n      if (prices[j] >= prices[i]) {\n        isMaximum = false;\n        break;\n      }\n    }\n    \n    for (let j = i + 1; j <= i + lookback; j++) {\n      if (prices[j] >= prices[i]) {\n        isMaximum = false;\n        break;\n      }\n    }\n    \n    if (isMaximum) {\n      resistanceLevels.push(prices[i]);\n    }\n  }\n  \n  // Sort and remove duplicates\n  const uniqueSupports = [...new Set(supportLevels)];\n  const uniqueResistances = [...new Set(resistanceLevels)];\n  \n  // Return only significant levels (up to 5 of each)\n  return {\n    support: uniqueSupports.sort((a, b) => b - a).slice(0, 5).map(p => p.toFixed(2)),\n    resistance: uniqueResistances.sort((a, b) => a - b).slice(0, 5).map(p => p.toFixed(2))\n  };\n}\n\n// Calculate levels\nconst fibonacciLevels = calculateFibonacciLevels();\nconst supportResistanceLevels = findSupportResistanceLevels();\n\n// Return information with additional stock data\nreturn {\n  json: {\n    ticker: data.meta.symbol,\n    currentPrice: parseFloat(data.values[0].close).toFixed(2),\n    fibonacci: fibonacciLevels,\n    supportResistance: supportResistanceLevels,\n    dataPoints: prices.length\n  }\n};"
+      },
+      "id": "4279f22d-9f2a-44fe-b2a7-fbc3e5a3eb28",
+      "name": "Calculate Support Resistance",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1088,
+        672
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twelvedata.com/macd",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "interval",
+              "value": "1day"
+            },
+            {
+              "name": "outputsize",
+              "value": "1"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $json.TwelveData_API_Key }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "30c3d157-5ee4-48ae-9b94-b47191648896",
+      "name": "Get MACD",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        864,
+        992
+      ],
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Getting data from different sources\n// Checking existence of objects before trying to access them\nconst items = $input.all();\nconst fibData = $input.first().json;\n\n// Trying to locate bband and MACD data if they exist\nlet bbandsData = null;\nlet macdData = null;\n\n// Trying to check if there is data in additional items\nif (items.length > 1 && items[1] && items[1].json) {\n  bbandsData = items[1].json;\n}\n\nif (items.length > 2 && items[2] && items[2].json) {\n  macdData = items[2].json;\n}\n\n// Creating data structure for the response - ensure all fields exist\nconst result = {\n  ticker: fibData.ticker || \"לא ידוע\",\n  currentPrice: fibData.currentPrice || \"0\",\n  timestamp: new Date().toISOString(),\n  technicalAnalysis: {\n    fibonacci: fibData.fibonacci || {},\n    supportResistance: fibData.supportResistance || { support: [], resistance: [] },\n    bollingerBands: {},\n    macd: {}\n  }\n};\n\n// Adding Bollinger Bands data - only if they exist\nif (bbandsData && bbandsData.values && bbandsData.values.length > 0) {\n  const bbands = bbandsData.values[0];\n  result.technicalAnalysis.bollingerBands = {\n    upperBand: parseFloat(bbands.upper_band).toFixed(2),\n    middleBand: parseFloat(bbands.middle_band).toFixed(2),\n    lowerBand: parseFloat(bbands.lower_band).toFixed(2)\n  };\n} else if (bbandsData && bbandsData.status === \"ok\") {\n  // If returning another data format\n  result.technicalAnalysis.bollingerBands = {\n    upperBand: bbandsData.upperBand || bbandsData.upper_band || \"0\",\n    middleBand: bbandsData.middleBand || bbandsData.middle_band || \"0\",\n    lowerBand: bbandsData.lowerBand || bbandsData.lower_band || \"0\"\n  };\n}\n\n// Adding MACD data - only if they exist\nif (macdData && macdData.values && macdData.values.length > 0) {\n  const macd = macdData.values[0];\n  result.technicalAnalysis.macd = {\n    macd: parseFloat(macd.macd).toFixed(2),\n    signal: parseFloat(macd.signal).toFixed(2),\n    histogram: parseFloat(macd.hist).toFixed(2)\n  };\n} else if (macdData && macdData.status === \"ok\") {\n  // If returning another data format\n  result.technicalAnalysis.macd = {\n    macd: macdData.macd || \"0\",\n    signal: macdData.signal || \"0\",\n    histogram: macdData.histogram || macdData.hist || \"0\"\n  };\n}\n\n// Creating summary and recommendation\nlet bullishFactors = [];\nlet bearishFactors = [];\n\n// Analyzing Bollinger Bands - only if data exists\nconst bbands = result.technicalAnalysis.bollingerBands;\nif (bbands.upperBand && bbands.lowerBand) {\n  const currentPrice = parseFloat(result.currentPrice);\n  const upperBand = parseFloat(bbands.upperBand);\n  const lowerBand = parseFloat(bbands.lowerBand);\n  \n  if (!isNaN(currentPrice) && !isNaN(upperBand) && !isNaN(lowerBand)) {\n    if (currentPrice > upperBand) {\n      bearishFactors.push(\"מחיר מעל רצועת בולינגר העליונה - אפשרות לקנייה יתר\");\n    } else if (currentPrice < lowerBand) {\n      bullishFactors.push(\"מחיר מתחת לרצועת בולינגר התחתונה - אפשרות למכירה יתר\");\n    }\n  }\n}\n\n// Analyzing MACD - only if data exists\nconst macdInfo = result.technicalAnalysis.macd;\nif (macdInfo.macd && macdInfo.signal) {\n  const macd = parseFloat(macdInfo.macd);\n  const signal = parseFloat(macdInfo.signal);\n  \n  if (!isNaN(macd) && !isNaN(signal)) {\n    if (macd > signal) {\n      bullishFactors.push(\"MACD מעל קו האיתות - אינדיקציה חיובית\");\n    } else {\n      bearishFactors.push(\"MACD מתחת לקו האיתות - אינדיקציה שלילית\");\n    }\n  }\n}\n\n// Analyzing support and resistance levels - only if data exists\nconst supportResistance = result.technicalAnalysis.supportResistance;\nif (supportResistance.support && supportResistance.resistance) {\n  const currentPrice = parseFloat(result.currentPrice);\n  \n  if (!isNaN(currentPrice)) {\n    const supports = supportResistance.support.map(s => parseFloat(s)).filter(s => !isNaN(s));\n    const resistances = supportResistance.resistance.map(r => parseFloat(r)).filter(r => !isNaN(r));\n    \n    // Finding the closest support level\n    let closestSupport = null;\n    let minSupportDist = Infinity;\n    for (const support of supports) {\n      if (support < currentPrice) {\n        const dist = currentPrice - support;\n        if (dist < minSupportDist) {\n          minSupportDist = dist;\n          closestSupport = support;\n        }\n      }\n    }\n    \n    // Finding the closest resistance level\n    let closestResistance = null;\n    let minResistanceDist = Infinity;\n    for (const resistance of resistances) {\n      if (resistance > currentPrice) {\n        const dist = resistance - currentPrice;\n        if (dist < minResistanceDist) {\n          minResistanceDist = dist;\n          closestResistance = resistance;\n        }\n      }\n    }\n    \n    // Adding support/resistance analysis\n    if (closestSupport !== null) {\n      const supportPercentage = ((currentPrice - closestSupport) / currentPrice * 100).toFixed(2);\n      if (supportPercentage < 5) {\n        bullishFactors.push(`המחיר קרוב לרמת תמיכה (${supportPercentage}%) - אפשרות להיפוך כלפי מעלה`);\n      }\n    }\n    \n    if (closestResistance !== null) {\n      const resistancePercentage = ((closestResistance - currentPrice) / currentPrice * 100).toFixed(2);\n      if (resistancePercentage < 5) {\n        bearishFactors.push(`המחיר קרוב לרמת התנגדות (${resistancePercentage}%) - אפשרות להיפוך כלפי מטה`);\n      }\n    }\n  }\n}\n\n// Analyzing Fibonacci - only if data exists\nconst fibonacci = result.technicalAnalysis.fibonacci;\nif (fibonacci && Object.keys(fibonacci).length > 0) {\n  const currentPrice = parseFloat(result.currentPrice);\n  \n  if (!isNaN(currentPrice)) {\n    const fibLevels = Object.values(fibonacci).map(level => parseFloat(level)).filter(level => !isNaN(level));\n    fibLevels.sort((a, b) => a - b);\n    \n    // Checking which Fibonacci level the price is at\n    for (let i = 0; i < fibLevels.length - 1; i++) {\n      if (currentPrice >= fibLevels[i] && currentPrice <= fibLevels[i+1]) {\n        // If the price is close to a Fibonacci resistance level\n        if (Math.abs(currentPrice - fibLevels[i+1]) / currentPrice * 100 < 2) {\n          bearishFactors.push(`המחיר קרוב לרמת פיבונאצ'י ${[0, 23.6, 38.2, 50, 61.8, 78.6, 100][Math.min(i+1, 6)]}% - אפשרות להתנגדות`);\n        }\n        // If the price is close to a Fibonacci support level\n        if (Math.abs(currentPrice - fibLevels[i]) / currentPrice * 100 < 2) {\n          bullishFactors.push(`המחיר קרוב לרמת פיבונאצ'י ${[0, 23.6, 38.2, 50, 61.8, 78.6, 100][Math.min(i, 6)]}% - אפשרות לתמיכה`);\n        }\n        break;\n      }\n    }\n  }\n}\n\n// Adding general recommendation based on factors\nlet recommendation = \"\";\nif (bullishFactors.length > bearishFactors.length) {\n  recommendation = \"חיובית\";\n} else if (bearishFactors.length > bullishFactors.length) {\n  recommendation = \"שלילית\";\n} else {\n  recommendation = \"נייטרלית\";\n}\n\n// Adding summary to the result\nresult.summary = {\n  recommendation: recommendation,\n  bullishFactors: bullishFactors,\n  bearishFactors: bearishFactors\n};\n\nreturn { json: result };"
+      },
+      "id": "de344021-4ec8-422c-a3bf-3e95505f920b",
+      "name": "Organizing Data",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1584,
+        832
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "id": "cde68ea9-8a1e-44fa-8613-7e06472b1a56",
+      "name": "Download Chart",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1088,
+        400
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "072ca40f-bd18-4fa3-a8c3-e653c718ce30",
+      "name": "Merge-2",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        1984,
+        672
+      ],
+      "typeVersion": 3.1
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "ticker"
+            },
+            {
+              "name": "chart_style"
+            }
+          ]
+        }
+      },
+      "id": "5e28016c-5e3d-43dd-bbf3-d196c800e397",
+      "name": "Workflow Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        288,
+        672
+      ],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fdf7e016-7082-4146-9038-454139023990",
+              "name": "ai_agent_visual_analysis",
+              "type": "string",
+              "value": "={{ $('First Technical Analysis').item.json.choices[0].message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fe448170-e0d5-403c-b6de-64c0b8fbae46",
+      "name": "Set Variable",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1584,
+        400
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "interval",
+              "value": "1day"
+            },
+            {
+              "name": "outputsize",
+              "value": "180"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $json.TwelveData_API_Key }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "b2d6b194-51dc-4e1e-80b2-01bb8835946c",
+      "name": "Get Price History",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        864,
+        672
+      ],
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cf5f7210-5b54-4f4a-abf7-87873be82df4",
+              "name": "ticker",
+              "type": "string",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "id": "9f008c4b-60e2-4d99-a119-b0170ec28358",
+              "name": "TwelveData_API_Key",
+              "type": "string",
+              "value": "PASTE_TWELVE_DATA_API_KEY_HERE"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e543df1a-e4c2-4de3-97d2-f6b8d6345033",
+      "name": "Set Stock Symbol and API Key",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        512,
+        672
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fdf7e016-7082-4146-9038-454139023990",
+              "name": "response",
+              "type": "string",
+              "value": "={{ $json.message.content }}"
+            },
+            {
+              "id": "4e5afd49-67c2-40ab-bc8c-565dea3850ed",
+              "name": "image",
+              "type": "string",
+              "value": "={{ $('Download Chart').item.json.url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5a426795-2e51-416c-bae6-5a3df8fa7bcb",
+      "name": "Set Final Response",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2832,
+        672
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twelvedata.com/bbands",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "interval",
+              "value": "1day"
+            },
+            {
+              "name": "outputsize",
+              "value": "1"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $json.TwelveData_API_Key }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "61c69961-dc69-4f56-a2a8-3e4876d61af0",
+      "name": "Get Bollinger Bands",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        864,
+        832
+      ],
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Replaces the former GPT-4o image-analysis step.\n// Pulls the numeric RSI from the 'Get RSI' node and produces a small\n// quantitative summary in the same shape the old vision node returned,\n// so the downstream 'Set Variable' reference keeps working unchanged.\nlet rsi = null;\ntry {\n  const r = $('Get RSI').first().json;\n  const v = (r && r.values && r.values[0] && r.values[0].rsi) ? r.values[0].rsi : null;\n  rsi = v !== null ? parseFloat(v) : null;\n} catch (e) { rsi = null; }\n\nlet rsiState = \"neutral\";\nif (rsi !== null) {\n  if (rsi >= 70) rsiState = \"overbought\";\n  else if (rsi <= 30) rsiState = \"oversold\";\n}\nconst summary = {\n  rsiNumeric: rsi,\n  rsiState: rsiState,\n  source: \"twelvedata-rsi\",\n  note: \"Quantitative indicators (RSI/MACD/Bollinger) drive this analysis; chart image is attached separately.\"\n};\nreturn [{ json: { choices: [ { message: { content: JSON.stringify(summary) } } ] } }];"
+      },
+      "id": "41445ba6-fc8c-4905-847f-c113391235ee",
+      "name": "First Technical Analysis",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1360,
+        400
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "09563b0e-010f-40ec-90e0-86bd6947def1",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        1360,
+        832
+      ],
+      "typeVersion": 3.1
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "google/gemma-3-27b-it",
+          "mode": "list",
+          "cachedResultName": "GOOGLE/GEMMA-3-27B-IT"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "# Role\nYou are a senior technical analyst who merges visual insights with quantitative indicators.\n\n# Inputs\n1. Visual JSON from Agent 1:\n   {\n     \"ai_agent_visual_analysis\": \"...\"\n   }\n2. Technical-indicator JSON in the format:\n   {\n     \"ticker\": \"...\",\n     \"currentPrice\": \"...\",\n     \"timestamp\": \"...\",\n     \"technicalAnalysis\": {\n       \"fibonacci\": { ... },\n       \"supportResistance\": { ... },\n       \"bollingerBands\": { ... },\n       \"macd\": { ... }\n     },\n     \"summary\": { ... }\n   }\n\n# Expected Sections\nWrite five titled sections exactly in this order:\n\n1. Quick Stats  \n   - Ticker, current price, timestamp  \n   - Overall recommendation from technical JSON, if present\n\n2. Candles and EMA  \n   - Use Agent 1 data: trendDirection, candlestickPatterns, emaRelation, volumeNotes\n\n3. RSI  \n   - Report rsiNumeric and rsiState from Agent 1  \n   - Mention rsiDivergence and its implication\n\n4. Indicator Synthesis  \n   - Fibonacci – cite closest level above and below price  \n   - Bollinger Bands – quote upper, middle, lower and note price position  \n   - MACD – quote macd, signal, histogram, note cross or momentum if numbers are valid  \n   - Support-Resistance – use technicalAnalysis plus priceZones from Agent 1 to highlight the nearest levels\n\n5. Actionable Takeaway  \n   - One sentence bias (bullish, bearish, neutral)  \n   - Clear next step such as watch for break above X or pullback to Y\n\n# Style Rules\n- Be concise and strictly data driven  \n- Every statement must reference either a value from the inputs or a specific visual observation from Agent 1  \n- No speculation beyond supplied data  \n- End after the Takeaway section – output nothing else",
+              "role": "system"
+            },
+            {
+              "content": "={{ $json.textPayload }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bf9ea075-1097-4350-a728-e62ce48b18e2",
+      "name": "ChatGPT 4o",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "position": [
+        2448,
+        672
+      ],
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "jiFppSK7YiJdXC6U",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twelvedata.com/rsi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "interval",
+              "value": "1day"
+            },
+            {
+              "name": "time_period",
+              "value": "14"
+            },
+            {
+              "name": "outputsize",
+              "value": "1"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $json.TwelveData_API_Key }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "b4f0219a-7c00-4362-945d-bde66a27e178",
+      "name": "Get RSI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        0,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "number": [
+            {
+              "name": "wantedDate",
+              "value": "={{ $json.wanted_date }}"
+            }
+          ],
+          "string": [
+            {
+              "name": "stockSymbol",
+              "value": "={{ $('Workflow Input Trigger').item.json.ticker }}"
+            },
+            {
+              "name": "apikey",
+              "value": "PASTE_ALPHA_VANTAGE_API_KEY_HERE"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "054b05fc-a1cb-46d2-92d0-b12e72c8c6bc",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2832,
+        1600
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Custom code for n8n Code node to analyze news data from Alpha Vantage\n * \n * - The code receives API data from the previous node\n * - Analyzes sentiment, leading articles, and hot topics\n * - Returns a structured JSON object for further processing\n */\n\nconst stockSymbol = $('Set Variables').first().json.stockSymbol\nconst allNews = $input.first().json.feed\n  ;\nconst today = new Date().toISOString().split('T')[0]; // Current date in YYYY-MM-DD format\n\n// Filter articles relevant to the stock\nconst relevantArticles = allNews.filter(article => {\n  return article.ticker_sentiment && article.ticker_sentiment.some(ticker => \n    ticker.ticker === stockSymbol\n  );\n});\n\n// Sentiment analysis\nlet sentimentCounts = {\n  \"Bullish\": 0,\n  \"Somewhat-Bullish\": 0,\n  \"Neutral\": 0,\n  \"Somewhat-Bearish\": 0,\n  \"Bearish\": 0\n};\n\nlet totalSentimentScore = 0;\nlet totalRelevanceScore = 0;\n\nrelevantArticles.forEach(article => {\n  const stockTicker = article.ticker_sentiment.find(ticker => ticker.ticker === stockSymbol);\n  if (stockTicker) {\n    sentimentCounts[stockTicker.ticker_sentiment_label]++;\n    totalSentimentScore += parseFloat(stockTicker.ticker_sentiment_score) * parseFloat(stockTicker.relevance_score);\n    totalRelevanceScore += parseFloat(stockTicker.relevance_score);\n  }\n});\n\nconst avgSentimentScore = totalRelevanceScore > 0 ? totalSentimentScore / totalRelevanceScore : 0;\n\n// Determining overall sentiment\nlet overallSentiment;\nif (avgSentimentScore >= 0.35) {\n  overallSentiment = \"חיובי מאוד\";\n} else if (avgSentimentScore >= 0.15) {\n  overallSentiment = \"חיובי\";\n} else if (avgSentimentScore > -0.15) {\n  overallSentiment = \"נייטרלי\";\n} else if (avgSentimentScore > -0.35) {\n  overallSentiment = \"שלילי\";\n} else {\n  overallSentiment = \"שלילי מאוד\";\n}\n\n// Most influential articles\nconst topArticles = relevantArticles\n  .map(article => {\n    const stockTicker = article.ticker_sentiment.find(ticker => ticker.ticker === stockSymbol);\n    return {\n      title: article.title,\n      url: article.url,\n      source: article.source,\n      date: formatDate(article.time_published),\n      sentiment_label: stockTicker ? stockTicker.ticker_sentiment_label : \"N/A\",\n      sentiment_score: stockTicker ? parseFloat(stockTicker.ticker_sentiment_score) : 0,\n      relevance_score: stockTicker ? parseFloat(stockTicker.relevance_score) : 0,\n      impact_score: stockTicker ? Math.abs(parseFloat(stockTicker.ticker_sentiment_score) * parseFloat(stockTicker.relevance_score)) : 0\n    };\n  })\n  .sort((a, b) => b.impact_score - a.impact_score)\n  .slice(0, 5);\n\n// Analysis of main topics\nconst topicsMap = {};\n\nrelevantArticles.forEach(article => {\n  if (article.topics) {\n    article.topics.forEach(topic => {\n      if (!topicsMap[topic.topic]) {\n        topicsMap[topic.topic] = {\n          count: 0,\n          relevance: 0\n        };\n      }\n      topicsMap[topic.topic].count++;\n      topicsMap[topic.topic].relevance += parseFloat(topic.relevance_score);\n    });\n  }\n});\n\nconst hotTopics = Object.entries(topicsMap)\n  .map(([topic, data]) => ({\n    topic,\n    article_count: data.count,\n    average_relevance: (data.relevance / data.count).toFixed(2)\n  }))\n  .sort((a, b) => b.article_count - a.article_count)\n  .slice(0, 5);\n\n// Creating result object\nconst analysisResult = {\n  stock_symbol: stockSymbol,\n  analysis_date: today,\n  sentiment_analysis: {\n    overall_sentiment: overallSentiment,\n    sentiment_score: parseFloat(avgSentimentScore.toFixed(4)),\n    sentiment_distribution: sentimentCounts\n  },\n  top_articles: topArticles.map(article => ({\n    title: article.title,\n    source: article.source,\n    url: article.url,\n    date: article.date,\n    sentiment: article.sentiment_label,\n    impact_score: article.impact_score.toFixed(4)\n  })),\n  hot_topics: hotTopics,\n  recent_trends: {\n    description: getTrendDescription(overallSentiment, hotTopics),\n    market_outlook: getMarketOutlook(overallSentiment)\n  }\n};\n\n// Helper functions\nfunction formatDate(dateStr) {\n  if (!dateStr) return \"N/A\";\n  \n  try {\n    // Format: 20250418T152049 -> 2025-04-18\n    const year = dateStr.substring(0, 4);\n    const month = dateStr.substring(4, 6);\n    const day = dateStr.substring(6, 8);\n    return `${year}-${month}-${day}`;\n  } catch (e) {\n    return dateStr;\n  }\n}\n\nfunction getTrendDescription(sentiment, topics) {\n  let description = \"\";\n  \n  if (sentiment === \"חיובי מאוד\" || sentiment === \"חיובי\") {\n    description = \"מגמה חיובית כאשר משקיעים מתמקדים בעיקר ב\";\n  } else if (sentiment === \"שלילי מאוד\" || sentiment === \"שלילי\") {\n    description = \"מגמה שלילית כאשר החששות העיקריים מתמקדים ב\";\n  } else {\n    description = \"מגמה מעורבת עם התמקדות ב\";\n  }\n  \n  if (topics.length > 0) {\n    const topThreeTopics = topics.slice(0, Math.min(3, topics.length));\n    description += topThreeTopics.map(t => t.topic).join(\", \");\n  } else {\n    description += \"מגוון נושאים\";\n  }\n  \n  return description + \".\";\n}\n\nfunction getMarketOutlook(sentiment) {\n  if (sentiment === \"חיובי מאוד\") {\n    return \"תחזית שוק חיובית מאוד. הסנטימנט הכללי מצביע על אמון משקיעים גבוה ופוטנציאל לעלייה בטווח הקצר.\";\n  } else if (sentiment === \"חיובי\") {\n    return \"תחזית שוק חיובית. ישנן אינדיקציות לאופטימיות זהירה בקרב משקיעים.\";\n  } else if (sentiment === \"נייטרלי\") {\n    return \"תחזית שוק מעורבת. קיימים כוחות מאזנים של אופטימיות ופסימיות בשוק.\";\n  } else if (sentiment === \"שלילי\") {\n    return \"תחזית שוק שלילית. ישנן דאגות בקרב משקיעים שעשויות להשפיע על המניה בטווח הקצר.\";\n  } else {\n    return \"תחזית שוק שלילית מאוד. קיימת אווירת זהירות משמעותית ונטייה למכירות.\";\n  }\n}\n\n// Return the object for further flow in n8n\nreturn {\n  json: analysisResult\n};"
+      },
+      "id": "ebdc7b64-a74b-4e2f-ac0e-4fd1fdc4cc8c",
+      "name": "Analyse API Input",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3200,
+        1600
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={{ $json.stockSymbol }}&sort=RELEVANCE&time_from={{ $json.wantedDate }}&apikey={{ $json.apikey }}",
+        "options": {}
+      },
+      "id": "0c3b1696-3782-4b54-9bc8-4e9acfd0fc5c",
+      "name": "Get News Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3008,
+        1600
+      ],
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Function to generate yesterday's date in the required format\nfunction getYesterdayDateFormat() {\n  // Create a current date object\n  const today = new Date();\n  \n  // Set the date to the previous day (yesterday)\n  today.setDate(today.getDate() - 1);\n  \n  // Reset hours, minutes, seconds and milliseconds to 00:00:00.000\n  today.setHours(0, 0, 0, 0);\n  \n  // Extract components\n  const year = today.getFullYear();\n  const month = String(today.getMonth() + 1).padStart(2, '0'); // Months in JS start from 0\n  const day = String(today.getDate()).padStart(2, '0');\n  const hours = String(today.getHours()).padStart(2, '0');\n  const minutes = String(today.getMinutes()).padStart(2, '0');\n  \n  // Build the string in the required format\n  return `${year}${month}${day}T${hours}${minutes}`;\n}\n// Calculate the date\nconst yesterdayDate = getYesterdayDateFormat();\n// Return the result in the format required by n8n - array of objects\nreturn [\n  {\n    json: {\n      wanted_date: yesterdayDate\n    }\n  }\n];"
+      },
+      "id": "7f0b5b8b-1dec-4bb7-be31-b557c156bfb5",
+      "name": "Generate Variables For API",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2672,
+        1600
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "=https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&ticker={{ $('Workflow Input Trigger').item.json.ticker }}&type=8-K&dateb=&owner=include&count=10&output=atom",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "StudentProject sachakov@post.bgu.ac.il"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "4a36ca46-7101-490e-bcdb-3bd5b2e65074",
+      "name": "Get Earnings Filings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -64,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract recent filing titles + dates from the SEC atom XML (text).\nconst xml = $input.first().json.data || \"\";\nconst entries = [];\nconst re = /<entry>([\\s\\S]*?)<\\/entry>/g;\nlet m;\nwhile ((m = re.exec(xml)) !== null && entries.length < 8) {\n  const block = m[1];\n  const t = (block.match(/<title>([\\s\\S]*?)<\\/title>/) || [,\"\"])[1].trim();\n  const d = (block.match(/<updated>([\\s\\S]*?)<\\/updated>/) || [,\"\"])[1].trim();\n  if (t) entries.push({ title: t, date: d });\n}\nreturn [{ json: { earningsFilings: entries } }];"
+      },
+      "id": "3764b2bc-c232-47ba-a521-93e21be827f5",
+      "name": "Parse Earnings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "e8b7e7eb-a91a-40ea-9c8b-fa85fd052105",
+      "name": "Merge Trends",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        576,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Ticker = {{ $json.message.text }}",
+        "options": {
+          "systemMessage": "=# Overview\nYou are an AI agent specialized in stock analysis. You provide technical analysis and news sentiment for stock investments by combining chart data and news sentiment. Your audience includes people with NO background in finance, so your writing must be clear and self-explanatory.\n\n# Instructions\n1. When a user requests an analysis of a stock with its symbol:\n  - Send the stock symbol to both tools **technical_analysis** and **trends_analysis**\n  - Analyze the combined data and prepare a JSON report with your insights\n  - Provide a clear recommendation (positive, neutral, or negative)\n2. Your output must be a single, valid JSON object using exactly the keys in the Response Format below.\n3. Always use the REAL stock symbol the user provided (for example NVDA). NEVER write a generic placeholder such as \"X\", \"מניה X\", or \"נכס X\".\n4. Use the date provided to you in the user message for \"analysisDate\". Do not invent a date.\n5. Translate the article titles in topArticles to Hebrew.\n6. Translate sentimentHebrew to exactly one of: \"חיובי-חזק/חיובי-חלש/נייטרלי/שלילי-חלש/שלילי-חזק\". (Somewhat = חלש.)\n7. Write every Date value in topArticles in this format only: \"DD/MM/YYYY\".\n8. The \"technicalAnalysis\" value must be a detailed analysis of three paragraphs in proper, professional Hebrew, covering all indicators examined (Volume, EMA, RSI, Fibonacci retracement, MACD, Bollinger bands, Resistance and Support levels).\n9. CRITICAL — write for non-experts: every time you mention a technical term, immediately follow it with a short, simple explanation in parentheses, in plain everyday Hebrew, so that someone with no knowledge of the stock market understands what it means and why it matters. Keep each explanation to one short sentence.\n   Example: \"ה-RSI עומד על 65 (מדד שבודק אם המניה 'התחממה' יתר על המידה — מעל 70 נחשב יקר ועלול לרדת, מתחת ל-30 נחשב זול ועשוי לעלות). לכן המצב מאוזן.\"\n10. In the \"Recommendation\" value, recommend buying or selling only if you believe with high probability there will be a meaningful rise or fall. Otherwise, your default is \"ממליץ לחכות\". Justify it in recommendationText, also in plain language.\n\n# Tools\n- **technical_analysis**: Generates technical analysis based on stock charts and indicators.\n- **trends_analysis**: Analyzes news sentiment for the requested stock.\n\n# Response Format\nRespond with a JSON object containing exactly these keys:\n{\n \"stockSymbol\": \"סימול\",\n \"analysisDate\": \"DD/MM/YYYY\",\n \"recommendationClass\": \"positive/neutral/negative\",\n \"recommendationTitle\": \"כותרת המלצה בעברית\",\n \"recommendationText\": \"הסבר מפורט ופשוט של ההמלצה בעברית\",\n \"bullishCount\": 0,\n \"neutralCount\": 0,\n \"bearishCount\": 0,\n \"bullishHeight\": 0,\n \"neutralHeight\": 0,\n \"bearishHeight\": 0,\n \"overallSentiment\": \"חיובי/נייטרלי/שלילי\",\n \"Recommendation\": \"ממליץ לקנות/ ממליץ לחכות/ ממליץ למכור\",\n \"sentimentScore\": 0.00,\n \"chartImageUrl\": \"URL_PLACEHOLDER\",\n \"technicalAnalysis\": \"ניתוח טכני מפורט בעברית, עם הסבר בסוגריים אחרי כל מונח מקצועי\",\n \"topArticles\": [\n   {\n     \"title\": \"כותרת המאמר בעברית\",\n     \"url\": \"כתובת URL של המאמר\",\n     \"source\": \"שם המקור באנגלית\",\n     \"date\": \"DD/MM/YYYY\",\n     \"sentimentClass\": \"bullish/neutral/bearish\",\n     \"sentimentHebrew\": \"חיובי-חזק/חיובי-חלש/נייטרלי/שלילי-חלש/שלילי-חזק\"\n   }\n ],\n \"hotTopics\": [\n   {\n     \"topic\": \"שם הנושא בעברית\",\n     \"article_count\": 0,\n     \"average_relevance\": \"0.00\"\n   }\n ]\n}\nOutput only the JSON object, with no code fences and no extra text."
+        }
+      },
+      "id": "5ac5b8e9-df06-42b8-a000-6496ea04c35c",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        2256,
+        -384
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "name": "technical_analysis",
+        "description": "Call this tool to get an analysis of a requested stock. It'll be obligatory to pass ticker.",
+        "workflowId": {
+          "__rl": true,
+          "value": "napKbUjOX17XaIHI",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/napKbUjOX17XaIHI",
+          "cachedResultName": "1 - Technical Analysis Tool"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ticker": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ticker', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ticker",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "ticker",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "chart_style",
+              "type": "string",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "chart_style",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "0fd944d9-3097-4a07-8476-6aa0518ff655",
+      "name": "Technical Analysis Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        2544,
+        -144
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {},
+      "id": "30164a5f-1481-4a51-a32b-9b2f8adc8da9",
+      "name": "Think",
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "position": [
+        2864,
+        -144
+      ],
+      "typeVersion": 1,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"stockSymbol\": \"סימול\",\n  \"analysisDate\": \"DD/MM/YYYY\",\n  \"recommendationClass\": \"positive/neutral/negative\",\n  \"recommendationTitle\": \"כותרת המלצה בעברית\",\n  \"recommendationText\": \"הסבר מפורט של ההמלצה בעברית\",\n  \"bullishCount\": 0,\n  \"neutralCount\": 0, \n  \"bearishCount\": 0,\n  \"bullishHeight\": 0,\n  \"neutralHeight\": 0,\n  \"bearishHeight\": 0,\n  \"overallSentiment\": \"חיובי/נייטרלי/שלילי\",\n  \"Recommendation\": \"ממליץ לקנות/ ממליץ לחכות/ ממליץ למכור\",\n  \"sentimentScore\": 0.00,\n  \"chartImageUrl\": \"URL_PLACEHOLDER\",\n  \"technicalAnalysis\": \"ניתוח טכני מפורט בעברית עם תגי <p>\",\n  \"topArticles\": [\n    {\n      \"title\": \"כותרת המאמר\",\n      \"url\": \"כתובת URL של המאמר\",\n      \"source\": \"שם המקור\",\n      \"date\": \"DD/MM/YYYY\",\n      \"sentimentClass\": \"bullish/neutral/bearish\",\n      \"sentimentHebrew\": \"חיובי-חזק/חיובי-חלש/נייטרלי/שלילי-חלש/שלילי-חזק\"\n    }\n  ],\n  \"hotTopics\": [\n    {\n      \"topic\": \"שם הנושא בעברית\",\n      \"article_count\": 0,\n      \"average_relevance\": \"0.00\"\n    }\n  ]\n}"
+      },
+      "id": "fda8239f-ceb2-413a-bc21-2245a80a7c0c",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "position": [
+        3072,
+        -144
+      ],
+      "typeVersion": 1.2,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "name": "trends_analysis",
+        "description": "Call this tool to get an analysis of a requested stock. It'll be obligatory to pass ticker.",
+        "workflowId": {
+          "__rl": true,
+          "value": "XnqxWVDrSIBEMPiG",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/XnqxWVDrSIBEMPiG",
+          "cachedResultName": "2 - Trends Analysis Tool"
+        },
+        "workflowInputs": {
+          "value": {
+            "ticker": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('ticker', ``, 'string') }}"
+          },
+          "schema": [
+            {
+              "id": "ticker",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "displayName": "ticker",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "chart_style",
+              "type": "string",
+              "display": true,
+              "removed": true,
+              "required": false,
+              "displayName": "chart_style",
+              "defaultMatch": false,
+              "canBeUsedToMatch": true
+            }
+          ],
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "5cc05562-b76c-4f7e-a387-5a2b8ba87ae3",
+      "name": "Trends Analysis Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "position": [
+        2704,
+        -144
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "CohereLabs/tiny-aya-global",
+          "mode": "list",
+          "cachedResultName": "COHERELABS/TINY-AYA-GLOBAL"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=\"technicalAnalysis\": {{ $json.output.technicalAnalysis }}"
+            },
+            {
+              "content": "=\"recommendationText\":  {{ $json.output.recommendationText }}"
+            },
+            {
+              "content": "Ensure that the text in the \"recommendationText\" \"technicalAnalysis\" values is written in proper Hebrew, like a professional analyst.\nReturn the same JSON format, but rewrite \"recommendationText\" \"technicalAnalysis\" values better.\nשים לב שכותבים \"רצועות בולינגר\" ולא \"חגורות בולינגר\"",
+              "role": "system"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "85003892-6b77-45d7-b4cf-42bca3783e4f",
+      "name": "Refine Text",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "position": [
+        2704,
+        -384
+      ],
+      "typeVersion": 1.8,
+      "credentials": {
+        "openAiApi": {
+          "id": "QLSxFpKl3YcLAcXI",
+          "name": "OpenAI account 2"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "965adf32-1a06-4af0-87e5-6768bcc1a78c",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        752,
+        -752
+      ],
+      "webhookId": "e4fdf35a-c8d9-45d3-9198-3587b0c72d72",
+      "credentials": {
+        "telegramApi": {
+          "id": "YNDbswkKUnlIxVlQ",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp = $input.first().json;\nlet raw =\n  (inp.message && inp.message.content) ??\n  inp.output ??\n  inp.content ??\n  inp.text ??\n  \"\";\n\nlet o = {};\nif (typeof raw === \"object\" && raw !== null) {\n  o = raw;\n} else {\n  let s = String(raw).trim();\n  s = s.replace(/^```json\\s*/i, \"\").replace(/^```\\s*/i, \"\").replace(/```$/i, \"\").trim();\n  try {\n    o = JSON.parse(s);\n  } catch (e) {\n    const start = s.indexOf(\"{\");\n    const end = s.lastIndexOf(\"}\");\n    if (start !== -1 && end !== -1 && end > start) {\n      try { o = JSON.parse(s.slice(start, end + 1)); } catch (e2) { o = {}; }\n    } else {\n      o = {};\n    }\n  }\n}\n\n// Force the real ticker in everywhere the model left a placeholder \"X\"\nconst sym = o.stockSymbol || String($input.first().json.ticker || \"\").toUpperCase();\nif (sym) {\n  const fixX = (txt) => String(txt)\n    .replace(/הנכס\\s+X/g, \"מניית \" + sym)\n    .replace(/נכס\\s+X/g, \"מניית \" + sym)\n    .replace(/מניית\\s+X/g, \"מניית \" + sym)\n    .replace(/מניה\\s+X/g, \"מניית \" + sym);\n  if (typeof o.technicalAnalysis === \"string\") o.technicalAnalysis = fixX(o.technicalAnalysis);\n  if (typeof o.recommendationText === \"string\") o.recommendationText = fixX(o.recommendationText);\n}\n\nconst lines = [];\nif (o.stockSymbol)      lines.push(\"📊 *\" + o.stockSymbol + \"*\");\nif (o.Recommendation)   lines.push(\"🔔 \" + o.Recommendation);\nif (o.overallSentiment) lines.push(\"סנטימנט כללי: \" + o.overallSentiment);\nlines.push(\"\");\nif (o.recommendationText) {\n  lines.push(String(o.recommendationText));\n  lines.push(\"\");\n}\n\nif (o.technicalAnalysis) {\n  let ta = o.technicalAnalysis;\n  let taText = \"\";\n  if (typeof ta === \"string\") {\n    taText = ta;\n  } else if (typeof ta === \"object\") {\n    if (ta.description) {\n      taText += ta.description + \"\\n\";\n    }\n    const inds = ta.keyIndicators || ta.indicators;\n    if (Array.isArray(inds)) {\n      for (const k of inds) {\n        const name = k.name || \"\";\n        const val = (k.currentValue !== undefined ? k.currentValue : (k.value !== undefined ? k.value : \"\"));\n        const desc = k.description || k.signal || \"\";\n        taText += \"• \" + name + (val !== \"\" ? \" (\" + val + \")\" : \"\") + (desc ? \": \" + desc : \"\") + \"\\n\";\n      }\n    }\n    if (!taText.trim()) {\n      taText = JSON.stringify(ta);\n    }\n  }\n  lines.push(\"📈 *ניתוח טכני*\");\n  lines.push(taText.replace(/\\\\n/g, \"\\n\").trim());\n  lines.push(\"\");\n}\n\nif (Array.isArray(o.topArticles) && o.topArticles.length) {\n  lines.push(\"📰 *כתבות בולטות*\");\n  for (const a of o.topArticles.slice(0, 5)) {\n    lines.push(\"• \" + (a.title || \"\") + (a.source ? \" (\" + a.source + \")\" : \"\"));\n  }\n}\n\nlet text = lines.join(\"\\n\").trim();\nif (!text) {\n  text = \"לא הצלחתי לפענח את הניתוח.\";\n}\nif (text.length > 3900) {\n  text = text.slice(0, 3900) + \"…\";\n}\n\nreturn [{ json: { text } }];"
+      },
+      "id": "903271f0-4ca2-4afd-a17a-2b2cc55544fa",
+      "name": "Build Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -752
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "7340623e-cb6b-42dc-ae6d-2ea0f97aa30f",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1664,
+        -752
+      ],
+      "webhookId": "d54b604a-a563-4c77-85ea-ef31f5be0f4a",
+      "credentials": {
+        "telegramApi": {
+          "id": "YNDbswkKUnlIxVlQ",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "maxTokensToSample": 4096
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        2144,
+        -144
+      ],
+      "id": "caa35cf9-e801-490b-b200-bda488c816ba",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "iSqwpcEdRM7F8yzq",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# Main AI agent\n",
+        "height": 1028,
+        "width": 2556,
+        "color": 4
+      },
+      "id": "9bfcfbb1-d290-403b-ab0f-fb0a82f18caa",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        672,
+        -992
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "# Technical Analysis Flow",
+        "height": 1076,
+        "width": 3308,
+        "color": 6
+      },
+      "id": "2ac595c1-4477-4598-b25e-9825ff15d2ed",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -112,
+        80
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "#  Trend analysis Flow",
+        "height": 612,
+        "width": 3676,
+        "color": 5
+      },
+      "id": "8d83dcb8-1fb2-4f58-b560-41be73fcc727",
+      "name": "Sticky Note3",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -240,
+        1344
+      ],
+      "typeVersion": 1
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Organizing Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge-2": {
+      "main": [
+        [
+          {
+            "node": "Warp as JSON for GPT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get MACD": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "ChatGPT 4o": {
+      "main": [
+        [
+          {
+            "node": "Set Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variable": {
+      "main": [
+        [
+          {
+            "node": "Merge-2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Chart URL": {
+      "main": [
+        [
+          {
+            "node": "Download Chart",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Chart": {
+      "main": [
+        [
+          {
+            "node": "First Technical Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organizing Data": {
+      "main": [
+        [
+          {
+            "node": "Merge-2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Price History": {
+      "main": [
+        [
+          {
+            "node": "Calculate Support Resistance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bollinger Bands": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Warp as JSON for GPT": {
+      "main": [
+        [
+          {
+            "node": "ChatGPT 4o",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Stock Symbol and API Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "First Technical Analysis": {
+      "main": [
+        [
+          {
+            "node": "Set Variable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Support Resistance": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Stock Symbol and API Key": {
+      "main": [
+        [
+          {
+            "node": "Get Chart URL",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Price History",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Bollinger Bands",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get MACD",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get RSI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get News Data": {
+      "main": [
+        [
+          {
+            "node": "Analyse API Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "Get News Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Variables For API": {
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Earnings Filings": {
+      "main": [
+        [
+          {
+            "node": "Parse Earnings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse API Input": {
+      "main": [
+        [
+          {
+            "node": "Merge Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Earnings": {
+      "main": [
+        [
+          {
+            "node": "Merge Trends",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Think": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Refine Text",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refine Text": {
+      "main": [
+        []
+      ]
+    },
+    "Trends Analysis Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Analysis Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        []
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8aabb55e-9a35-4649-86ea-8e0a37dc24ea",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bf00f3c3721e368cc295fea6dcd546d93249bcf89a8c29d5f6238f14c927be05"
+  },
+  "nodeGroups": [],
+  "id": "y4RjsSlWKot9Jf4C",
+  "tags": []
+}
